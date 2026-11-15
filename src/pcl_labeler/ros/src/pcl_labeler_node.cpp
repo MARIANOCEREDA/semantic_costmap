@@ -1,5 +1,7 @@
 #include "pcl_labeler/pcl_labeler_node.hpp"
 
+#include <chrono>
+#include <optional>
 #include <cv_bridge/cv_bridge.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/image_encodings.hpp>
@@ -9,6 +11,65 @@
 
 namespace pcl_labeler
 {
+namespace
+{
+// Builds a non-owning view over the message bytes. Returns nullopt (and sets `reason`) if the
+// layout cannot be read safely as little-endian float32 x/y/z.
+std::optional<PointCloudView> MakePointCloudView(const sensor_msgs::msg::PointCloud2& msg,
+                                                 std::string& reason)
+{
+  std::optional<std::size_t> offsets[3];
+  constexpr const char* kNames[3] = {"x", "y", "z"};
+  for (const auto& field : msg.fields)
+  {
+    for (int i = 0; i < 3; ++i)
+    {
+      if (field.name == kNames[i] && field.datatype == sensor_msgs::msg::PointField::FLOAT32 &&
+          field.count >= 1)
+      {
+        offsets[i] = field.offset;
+      }
+    }
+  }
+  if (!offsets[0] || !offsets[1] || !offsets[2])
+  {
+    reason = "Point cloud needs float32 x, y, z fields.";
+    return std::nullopt;
+  }
+  if (msg.is_bigendian)
+  {
+    reason = "Big-endian point clouds are not supported.";
+    return std::nullopt;
+  }
+  for (const auto& offset : offsets)
+  {
+    if (*offset + sizeof(float) > msg.point_step)
+    {
+      reason = "Field offset outside point_step.";
+      return std::nullopt;
+    }
+  }
+  const std::size_t width = msg.width;
+  const std::size_t height = msg.height;
+  if (static_cast<std::size_t>(msg.row_step) < width * msg.point_step ||
+      msg.data.size() < static_cast<std::size_t>(msg.row_step) * height)
+  {
+    reason = "Point cloud data is smaller than width/height/row_step imply.";
+    return std::nullopt;
+  }
+
+  PointCloudView view;
+  view.data = msg.data.data();
+  view.width = width;
+  view.height = height;
+  view.point_step = msg.point_step;
+  view.row_step = msg.row_step;
+  view.x_offset = *offsets[0];
+  view.y_offset = *offsets[1];
+  view.z_offset = *offsets[2];
+  return view;
+}
+}  // namespace
 
 PCLLabelerNode::PCLLabelerNode(const rclcpp::NodeOptions& options)
   : rclcpp_lifecycle::LifecycleNode("pcl_labeler_node", options)
@@ -17,13 +78,7 @@ PCLLabelerNode::PCLLabelerNode(const rclcpp::NodeOptions& options)
 
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
-  pcl_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
   labeled_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-}
-
-CallbackReturn PCLLabelerNode::on_configure(const rclcpp_lifecycle::State&)
-{
-  RCLCPP_INFO(get_logger(), "Configuring Camera-LiDAR Fusion Node...");
 
   this->declare_parameter<std::string>("camera_frame_name", "camera_frame");
   this->declare_parameter<std::string>("lidar_frame_name", "lidar_frame");
@@ -33,9 +88,16 @@ CallbackReturn PCLLabelerNode::on_configure(const rclcpp_lifecycle::State&)
   this->declare_parameter<std::string>("camera_info_topic", "camera_info");
   this->declare_parameter<int>("sync_queue_size", 10);
   this->declare_parameter<double>("sync_max_interval", 0.05);
+  this->declare_parameter<bool>("display_latency", false);
+}
+
+CallbackReturn PCLLabelerNode::on_configure(const rclcpp_lifecycle::State&)
+{
+  RCLCPP_INFO(get_logger(), "Configuring Camera-LiDAR Fusion Node...");
 
   camera_frame_name_ = this->get_parameter("camera_frame_name").as_string();
   lidar_frame_name_ = this->get_parameter("lidar_frame_name").as_string();
+  display_latency_ = this->get_parameter("display_latency").as_bool();
 
   std::string point_cloud_topic = this->get_parameter("point_cloud_topic").as_string();
   std::string segmentation_mask_topic = this->get_parameter("segmentation_mask_topic").as_string();
@@ -101,6 +163,7 @@ CallbackReturn PCLLabelerNode::on_cleanup(const rclcpp_lifecycle::State&)
   RCLCPP_INFO(get_logger(), "Cleaning up Camera-LiDAR Fusion Node...");
   labeled_pcl_pub_.reset();
   camera_info_sub_.reset();
+  camera_info_received_ = false;
   sync_.reset();
   segmentation_mask_sub_.reset();
   lidar_sub_.reset();
@@ -133,22 +196,20 @@ void PCLLabelerNode::label_point_cloud(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr& input_cloud,
     const sensor_msgs::msg::Image::ConstSharedPtr& segmentation_mask)
 {
-  cv::Mat camera_intrinsics;
-  {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    if (!camera_info_received_)
-    {
-      RCLCPP_DEBUG(get_logger(), "Camera info not received yet. Skipping labeling.");
-      return;
-    }
-    camera_intrinsics = camera_intrinsics_.clone();
-  }
+  // Stage timing uses a monotonic clock; message age uses the ROS clock (sim time aware).
+  using StageClock = std::chrono::steady_clock;
+  const auto elapsed_ms = [](StageClock::time_point from, StageClock::time_point to)
+  { return std::chrono::duration<double, std::milli>(to - from).count(); };
+  
+  const auto t_start = StageClock::now();
 
-  RCLCPP_DEBUG(
-      get_logger(),
-      "Labeling cloud/mask pair with stamp offset %.3f s",
-      (rclcpp::Time(input_cloud->header.stamp) - rclcpp::Time(segmentation_mask->header.stamp))
-          .seconds());
+  cv::Mat camera_intrinsics;
+  if (!camera_info_received_)
+  {
+    RCLCPP_INFO(get_logger(), "Camera info not received yet. Skipping labeling.");
+    return;
+  }
+  camera_intrinsics = camera_intrinsics_.clone();
 
   try
   {
@@ -161,9 +222,10 @@ void PCLLabelerNode::label_point_cloud(
     Eigen::Matrix4f extrinsics = transform_eigen.matrix().cast<float>();
 
     // 2. Convert segmentation mask to OpenCV
-    
-    const size_t required_size = static_cast<size_t>(segmentation_mask->width) *
-                                 static_cast<size_t>(segmentation_mask->height);
+    const size_t required_size = static_cast<size_t>(segmentation_mask->step) *
+                                     (static_cast<size_t>(segmentation_mask->height) - 1) +
+                                 static_cast<size_t>(segmentation_mask->width);
+    const size_t actual_size = segmentation_mask->data.size();
 
     bool valid_img_msg = true;
     std::string reason = "";
@@ -174,7 +236,7 @@ void PCLLabelerNode::label_point_cloud(
       reason = "Invalid segmentation mask step.";
     }
 
-    if (segmentation_mask->data.size() < required_size)
+    if (actual_size < required_size)
     {
       valid_img_msg = false;
       reason = "Segmentation mask data size is smaller than expected.";
@@ -193,18 +255,24 @@ void PCLLabelerNode::label_point_cloud(
       return;
     }
 
-    cv::Mat mask_single_channel(cv::Size(segmentation_mask->width, segmentation_mask->height),
+    cv::Mat mask_single_channel(segmentation_mask->width,
+                                segmentation_mask->height,
                                 CV_8UC1,
                                 const_cast<uint8_t*>(segmentation_mask->data.data()),
                                 static_cast<size_t>(segmentation_mask->step));
-    
 
-    // 3. Convert ROS PointCloud2 to PCL
-    pcl_cloud_->clear();
-    pcl::fromROSMsg(*input_cloud, *pcl_cloud_);
+    // 3. View the PointCloud2 bytes in place. `input_cloud` (ConstSharedPtr) keeps the buffer
+    //    alive for this whole callback, and fuse() is synchronous, so the view cannot dangle.
+    std::string cloud_reason;
+    const std::optional<PointCloudView> cloud_view = MakePointCloudView(*input_cloud, cloud_reason);
+    if (!cloud_view)
+    {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 1000, "Invalid point cloud message: %s", cloud_reason.c_str());
+      return;
+    }
 
-    // 4. Setup the pcl labeler and call fuse()
-    pcl_labeler::PCLLabeler pcl_labeler;
+    // 4. Update the persistent labeler's calibration and call fuse()
 
     // Convert camera intrinsics to Eigen
     Eigen::Matrix3f intrinsics_eigen;
@@ -216,20 +284,31 @@ void PCLLabelerNode::label_point_cloud(
       }
     }
 
-    pcl_labeler.set_extrinsics(extrinsics);
-    pcl_labeler.set_intrinsics(intrinsics_eigen);
+    labeler_.set_extrinsics(extrinsics);
+    labeler_.set_intrinsics(intrinsics_eigen);
 
     // Fuse mask with point cloud
-    labeled_cloud_->clear();
-    labeled_cloud_ = pcl_labeler.fuse(mask_single_channel, pcl_cloud_);
+    labeler_.fuse(mask_single_channel, *cloud_view, *labeled_cloud_);
 
     // 5. Convert back to ROS PointCloud2
-    sensor_msgs::msg::PointCloud2 output_msg;
-    pcl::toROSMsg(*labeled_cloud_, output_msg);
-    output_msg.header = input_cloud->header;
+    auto output_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+    pcl::toROSMsg(*labeled_cloud_, *output_msg);
+    output_msg->header = input_cloud->header;
 
     // 6. Publish labeled point cloud
-    labeled_pcl_pub_->publish(output_msg);
+    labeled_pcl_pub_->publish(std::move(output_msg));
+    const auto t_publish = StageClock::now();
+
+    if (display_latency_)
+    {
+      RCLCPP_INFO_THROTTLE(get_logger(),
+                           *get_clock(),
+                           1000,
+                           "Latency [ms] total=%.3f | points in=%zu out=%zu",
+                           elapsed_ms(t_start, t_publish),
+                           cloud_view->size(),
+                           labeled_cloud_->size());
+    }
   }
   catch (const tf2::TransformException& ex)
   {

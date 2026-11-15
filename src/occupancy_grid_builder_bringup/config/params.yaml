@@ -22,8 +22,7 @@ ground_segmentation_node:
 # Image undistort
 image_undistort_node:
   ros__parameters:
-    resize_output: false
-    display_latency: true
+    display_latency: false
 
 # YOLO ONNX segmentor
 yolo_onnx_segmentor_node:
@@ -43,6 +42,7 @@ pcl_labeler_node:
     labeled_point_cloud_topic: points_labeled
     segmentation_mask_topic: /segmentation/mask
     camera_info_topic: camera_info
+    display_latency: true
     sync_queue_size: 10
     sync_max_interval: 0.05  # seconds between cloud and mask stamps
 

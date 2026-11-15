@@ -4,7 +4,6 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
-#include <mutex>
 #include <opencv2/opencv.hpp>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -14,6 +13,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include "pcl_labeler/pcl_labeler.hpp"
 #include "tf2/exceptions.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -57,16 +57,18 @@ class PCLLabelerNode : public rclcpp_lifecycle::LifecycleNode
 
   std::string camera_frame_name_;
   std::string lidar_frame_name_;
+  bool display_latency_{false};
 
   cv::Mat camera_intrinsics_;
 
   std::atomic<bool> camera_info_received_{false};
 
-  std::mutex data_mutex_;
-
   sensor_msgs::msg::PointCloud2 output_labeled_cloud_;
 
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_cloud_;
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr labeled_cloud_;
+
+  // One labeler for the node's lifetime. Only used from label_point_cloud(), which runs in a
+  // mutually exclusive callback group, so it is never accessed concurrently.
+  PCLLabeler labeler_;
 };
 }  // namespace pcl_labeler
