@@ -255,8 +255,10 @@ void PCLLabelerNode::label_point_cloud(
       return;
     }
 
-    cv::Mat mask_single_channel(segmentation_mask->width,
-                                segmentation_mask->height,
+    // cv::Size is (width, height); the cv::Mat(rows, cols, ...) overload would transpose the view
+    // and make erode()/at<>() read past the end of the message buffer.
+    cv::Mat mask_single_channel(cv::Size(static_cast<int>(segmentation_mask->width),
+                                         static_cast<int>(segmentation_mask->height)),
                                 CV_8UC1,
                                 const_cast<uint8_t*>(segmentation_mask->data.data()),
                                 static_cast<size_t>(segmentation_mask->step));
