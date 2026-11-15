@@ -89,6 +89,9 @@ PCLLabelerNode::PCLLabelerNode(const rclcpp::NodeOptions& options)
   this->declare_parameter<int>("sync_queue_size", 10);
   this->declare_parameter<double>("sync_max_interval", 0.05);
   this->declare_parameter<bool>("display_latency", false);
+  this->declare_parameter<bool>("outlier_removal_enabled", true);
+  this->declare_parameter<int>("outlier_mean_k", 10);
+  this->declare_parameter<double>("outlier_stddev_mul", 1.0);
 }
 
 CallbackReturn PCLLabelerNode::on_configure(const rclcpp_lifecycle::State&)
@@ -98,6 +101,20 @@ CallbackReturn PCLLabelerNode::on_configure(const rclcpp_lifecycle::State&)
   camera_frame_name_ = this->get_parameter("camera_frame_name").as_string();
   lidar_frame_name_ = this->get_parameter("lidar_frame_name").as_string();
   display_latency_ = this->get_parameter("display_latency").as_bool();
+
+  OutlierRemovalParams outlier_params;
+  outlier_params.enabled = this->get_parameter("outlier_removal_enabled").as_bool();
+  outlier_params.mean_k = static_cast<int>(this->get_parameter("outlier_mean_k").as_int());
+  outlier_params.stddev_mul = this->get_parameter("outlier_stddev_mul").as_double();
+  try
+  {
+    labeler_.set_outlier_removal(outlier_params);
+  }
+  catch (const std::invalid_argument& ex)
+  {
+    RCLCPP_ERROR(get_logger(), "%s", ex.what());
+    return CallbackReturn::FAILURE;
+  }
 
   std::string point_cloud_topic = this->get_parameter("point_cloud_topic").as_string();
   std::string segmentation_mask_topic = this->get_parameter("segmentation_mask_topic").as_string();

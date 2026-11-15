@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22.1)
 project(pcl_labeler_cpp)
 
 find_package(OpenCV REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common)
+find_package(PCL REQUIRED COMPONENTS common filters search kdtree)
 find_package(nlohmann_json REQUIRED)
 
 include_directories(include ${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} ${nlohmann_json_INCLUDE_DIRS})

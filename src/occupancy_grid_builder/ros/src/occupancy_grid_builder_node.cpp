@@ -12,11 +12,6 @@ OccupancyGridBuilderNode::OccupancyGridBuilderNode(const rclcpp::NodeOptions& op
   RCLCPP_INFO(this->get_logger(), "OccupancyGridBuilderNode created");
 
   pcl_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-}
-
-CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::State&)
-{
-  RCLCPP_INFO(this->get_logger(), "Configuring OccupancyGridBuilderNode");
 
   // Declare and get parameters
   this->declare_parameter<std::string>("pointcloud_topic", "/points_labeled");
@@ -29,6 +24,11 @@ CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::St
   this->declare_parameter<double>("origin_x", -50.0);
   this->declare_parameter<double>("origin_y", -50.0);
   this->declare_parameter<bool>("display_latency", false);
+}
+
+CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::State&)
+{
+  RCLCPP_INFO(this->get_logger(), "Configuring OccupancyGridBuilderNode");
 
   this->get_parameter("pointcloud_topic", pointcloud_topic_);
   this->get_parameter("grid_topic", grid_topic_);
@@ -214,10 +214,11 @@ void OccupancyGridBuilderNode::gridBuilderThread(std::stop_token stop_token)
     pcl_cloud_->clear();
     if (msg->width == 0 || msg->height == 0 || msg->data.empty())
     {
-      RCLCPP_WARN_THROTTLE(this->get_logger(),
-                           *this->get_clock(),
-                           1000,
-                           "Received an empty point cloud; publishing an unknown grid for this scan");
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(),
+          *this->get_clock(),
+          1000,
+          "Received an empty point cloud; publishing an unknown grid for this scan");
     }
     else
     {
@@ -235,7 +236,8 @@ void OccupancyGridBuilderNode::gridBuilderThread(std::stop_token stop_token)
     {
       const double cloud_latency =
           (this->now() - rclcpp::Time(msg->header.stamp, RCL_ROS_TIME)).seconds();
-      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "Pipeline latency: %.3f s", cloud_latency);
+      RCLCPP_INFO_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000, "Pipeline latency: %.3f s", cloud_latency);
     }
   }
 }

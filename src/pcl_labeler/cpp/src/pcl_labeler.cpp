@@ -1,6 +1,7 @@
 #include "pcl_labeler/pcl_labeler.hpp"
 
 #include <cstring>
+#include <stdexcept>
 
 namespace pcl_labeler
 {
@@ -10,6 +11,19 @@ PCLLabeler::PCLLabeler()
   extrinsics_ = Eigen::Matrix4f::Identity();
   intrinsics_ = Eigen::Matrix3f::Identity();
   erode_kernel_ = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+  object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+  set_outlier_removal(OutlierRemovalParams{});
+}
+
+void PCLLabeler::set_outlier_removal(const OutlierRemovalParams& params)
+{
+  if (params.mean_k < 1 || params.stddev_mul < 0.0)
+  {
+    throw std::invalid_argument("PCLLabeler: outlier removal needs mean_k >= 1 and stddev_mul >= 0");
+  }
+  outlier_params_ = params;
+  sor_.setMeanK(params.mean_k);
+  sor_.setStddevMulThresh(params.stddev_mul);
 }
 
 void PCLLabeler::set_extrinsics(const Eigen::Matrix4f& extrinsics)
@@ -70,8 +84,12 @@ void PCLLabeler::fuse(const cv::Mat& image,
                       const PointCloudView& cloud,
                       pcl::PointCloud<pcl::PointXYZRGB>& output)
 {
-  // 1. Clear the output cloud (keeps its capacity)
+  // 1. Clear the output cloud and the per-object index lists (both keep their capacity)
   output.clear();
+  for (auto& indices : label_indices_)
+  {
+    indices.clear();
+  }
 
   // 2. Erode the mask to avoid edge effects
   const cv::Mat& image_eroded = erode_mask(image);
@@ -121,6 +139,10 @@ void PCLLabeler::fuse(const cv::Mat& image,
 
       const cv::Vec3b color = sample_color_at_pixel(image_eroded, u, v);
 
+      // Remember which object (mask value) this output point belongs to
+      label_indices_[image_eroded.at<uint8_t>(v, u)].push_back(
+          static_cast<pcl::index_t>(output.size()));
+
       // 7. Create a colored point and add it to the output cloud
       pcl::PointXYZRGB colored_point;
       colored_point.x = x;
@@ -133,7 +155,68 @@ void PCLLabeler::fuse(const cv::Mat& image,
     }
   }
 
-  // 8. Clustering and outlier removal based on statistical analysis
+  // 8. Statistical outlier removal, per object
+  remove_outliers(output);
+}
+
+void PCLLabeler::remove_outliers(pcl::PointCloud<pcl::PointXYZRGB>& cloud)
+{
+  if (!outlier_params_.enabled || cloud.empty())
+  {
+    return;
+  }
+
+  keep_flags_.assign(cloud.size(), 0);
+
+  for (const pcl::Indices& object_indices : label_indices_)
+  {
+    if (object_indices.empty())
+    {
+      continue;
+    }
+
+    // Each point needs mean_k neighbours besides itself; with fewer points there are no statistics
+    // to estimate, so the object is kept as is.
+    if (object_indices.size() <= static_cast<std::size_t>(outlier_params_.mean_k))
+    {
+      for (const pcl::index_t i : object_indices)
+      {
+        keep_flags_[static_cast<std::size_t>(i)] = 1;
+      }
+      continue;
+    }
+
+    // Gather the object into its own cloud. StatisticalOutlierRemoval builds its kd-tree over the
+    // whole input cloud even when setIndices() is used, so neighbours would leak across objects.
+    object_cloud_->clear();
+    for (const pcl::index_t i : object_indices)
+    {
+      object_cloud_->push_back(cloud[static_cast<std::size_t>(i)]);
+    }
+
+    sor_.setInputCloud(object_cloud_);
+    sor_.filter(object_inliers_);
+
+    // Map inliers (indices into object_cloud_) back to indices into `cloud`
+    for (const pcl::index_t j : object_inliers_)
+    {
+      keep_flags_[static_cast<std::size_t>(object_indices[static_cast<std::size_t>(j)])] = 1;
+    }
+  }
+
+  // In-place compaction: the write position never passes the read position, so no point is
+  // overwritten before it is read, and no second cloud is needed.
+  std::size_t write = 0;
+  for (std::size_t read = 0; read < cloud.size(); ++read)
+  {
+    if (keep_flags_[read] != 0)
+    {
+      cloud.points[write++] = cloud.points[read];
+    }
+  }
+  cloud.points.resize(write);
+  cloud.width = static_cast<std::uint32_t>(write);
+  cloud.height = 1;
 }
 
 cv::Vec3b PCLLabeler::sample_color_at_pixel(const cv::Mat& image, int u, int v)
