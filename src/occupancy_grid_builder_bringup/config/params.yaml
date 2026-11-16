@@ -50,7 +50,7 @@ pcl_labeler_node:
 occupancy_grid_builder_node:
   ros__parameters:
     # Topic names
-    pointcloud_topic: "/points_labeled"
+    pointcloud_topic: "/segmented_points"   # all points + ground flag (occupancy from geometry)
     grid_topic: "/map"
     display_latency: false
 
@@ -64,6 +64,10 @@ occupancy_grid_builder_node:
     height: 2000           # cells (2000 * 0.1 = 200m)
     origin_x: -100.0       # meters (map covers -100 to +100)
     origin_y: -100.0       # meters (map covers -100 to +100)
+
+    # Scan filtering
+    max_range: 20.0            # meters, horizontal; farther points are ignored
+    max_obstacle_height: 2.0   # meters above the sensor; higher non-ground points are ignored
 
 # EKF (robot_localization)
 ekf_filter_node:

@@ -1,20 +1,90 @@
 #include <Eigen/Geometry>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <occupancy_grid_builder/occupancy_grid_builder_node.hpp>
+#include <optional>
+#include <sensor_msgs/msg/point_field.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 
 namespace occupancy_grid_builder
 {
+namespace
+{
+const sensor_msgs::msg::PointField* FindField(const sensor_msgs::msg::PointCloud2& msg,
+                                              const std::string& name)
+{
+  for (const auto& field : msg.fields)
+  {
+    if (field.name == name)
+    {
+      return &field;
+    }
+  }
+  return nullptr;
+}
+
+// Builds a non-owning view over msg.data, or returns nullopt (with `reason`) if the layout is not
+// what the builder can read. The view is only valid while `msg` is alive.
+std::optional<PointCloudView> MakePointCloudView(const sensor_msgs::msg::PointCloud2& msg,
+                                                 std::string& reason)
+{
+  using sensor_msgs::msg::PointField;
+  const PointField* x = FindField(msg, "x");
+  const PointField* y = FindField(msg, "y");
+  const PointField* z = FindField(msg, "z");
+  const PointField* ground = FindField(msg, "ground");
+  if (x == nullptr || y == nullptr || z == nullptr || ground == nullptr)
+  {
+    reason = "cloud needs fields x, y, z and ground (from ground_segmentation)";
+    return std::nullopt;
+  }
+  if (x->datatype != PointField::FLOAT32 || y->datatype != PointField::FLOAT32 ||
+      z->datatype != PointField::FLOAT32 || ground->datatype != PointField::UINT8)
+  {
+    reason = "x/y/z must be FLOAT32 and ground UINT8";
+    return std::nullopt;
+  }
+  if (msg.is_bigendian)
+  {
+    reason = "big-endian clouds are not supported";
+    return std::nullopt;
+  }
+  if (x->offset + sizeof(float) > msg.point_step || y->offset + sizeof(float) > msg.point_step ||
+      z->offset + sizeof(float) > msg.point_step || ground->offset + 1 > msg.point_step)
+  {
+    reason = "a field lies outside point_step";
+    return std::nullopt;
+  }
+  if (static_cast<std::size_t>(msg.row_step) <
+          static_cast<std::size_t>(msg.width) * msg.point_step ||
+      msg.data.size() < static_cast<std::size_t>(msg.row_step) * msg.height)
+  {
+    reason = "data is smaller than row_step * height";
+    return std::nullopt;
+  }
+
+  PointCloudView view;
+  view.data = msg.data.data();
+  view.width = msg.width;
+  view.height = msg.height;
+  view.point_step = msg.point_step;
+  view.row_step = msg.row_step;
+  view.x_offset = x->offset;
+  view.y_offset = y->offset;
+  view.z_offset = z->offset;
+  view.ground_offset = ground->offset;
+  return view;
+}
+}  // namespace
 
 OccupancyGridBuilderNode::OccupancyGridBuilderNode(const rclcpp::NodeOptions& options)
   : rclcpp_lifecycle::LifecycleNode("occupancy_grid_builder_node", options)
 {
   RCLCPP_INFO(this->get_logger(), "OccupancyGridBuilderNode created");
 
-  pcl_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-
   // Declare and get parameters
-  this->declare_parameter<std::string>("pointcloud_topic", "/points_labeled");
+  // Full cloud from ground_segmentation (all points + `ground` field), not the labeled cloud:
+  // occupancy comes from LiDAR geometry, labels only say what an occupied cell is.
+  this->declare_parameter<std::string>("pointcloud_topic", "/segmented_points");
   this->declare_parameter<std::string>("grid_topic", "/map");
   this->declare_parameter<std::string>("map_frame", "map");
   this->declare_parameter<std::string>("sensor_frame", "lidar_frame");
@@ -32,6 +102,10 @@ OccupancyGridBuilderNode::OccupancyGridBuilderNode(const rclcpp::NodeOptions& op
   this->declare_parameter<double>("max_probability", log_odds_defaults.max_probability);
   this->declare_parameter<double>("occupied_threshold", log_odds_defaults.occupied_threshold);
   this->declare_parameter<double>("free_threshold", log_odds_defaults.free_threshold);
+  // Scan filtering (see occupancy_grid_builder::ScanFilterParams)
+  const ScanFilterParams scan_filter_defaults;
+  this->declare_parameter<double>("max_range", scan_filter_defaults.max_range);
+  this->declare_parameter<double>("max_obstacle_height", scan_filter_defaults.max_obstacle_height);
 }
 
 CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::State&)
@@ -70,6 +144,11 @@ CallbackReturn OccupancyGridBuilderNode::on_activate(const rclcpp_lifecycle::Sta
     log_odds.occupied_threshold = this->get_parameter("occupied_threshold").as_double();
     log_odds.free_threshold = this->get_parameter("free_threshold").as_double();
     grid_builder_->setLogOddsParams(log_odds);
+
+    ScanFilterParams scan_filter;
+    scan_filter.max_range = this->get_parameter("max_range").as_double();
+    scan_filter.max_obstacle_height = this->get_parameter("max_obstacle_height").as_double();
+    grid_builder_->setScanFilterParams(scan_filter);
   }
   catch (const std::invalid_argument& ex)
   {
@@ -215,21 +294,21 @@ void OccupancyGridBuilderNode::gridBuilderThread(std::stop_token stop_token)
     Eigen::Isometry3d transform_eigen = tf2::transformToEigen(transform_stamped.transform);
     transform_matrix_ = transform_eigen.matrix().cast<float>();
 
-    pcl_cloud_->clear();
-    if (msg->width == 0 || msg->height == 0 || msg->data.empty())
+    // Read the points in place: `msg` (held by this scope) owns the bytes the view points into.
+    std::string reason;
+    const std::optional<PointCloudView> cloud_view = MakePointCloudView(*msg, reason);
+    if (!cloud_view)
     {
-      RCLCPP_WARN_THROTTLE(
-          this->get_logger(),
-          *this->get_clock(),
-          1000,
-          "Received an empty point cloud; publishing an unknown grid for this scan");
-    }
-    else
-    {
-      pcl::fromROSMsg(*msg, *pcl_cloud_);
+      RCLCPP_WARN_THROTTLE(this->get_logger(),
+                           *this->get_clock(),
+                           2000,
+                           "Skipping point cloud on %s: %s",
+                           pointcloud_topic_.c_str(),
+                           reason.c_str());
+      continue;
     }
 
-    const auto& grid = grid_builder_->buildGridFromPCL(pcl_cloud_, transform_matrix_);
+    const auto& grid = grid_builder_->integrateScan(*cloud_view, transform_matrix_);
 
     auto grid_msg = convertToOccupancyGrid(grid, msg->header);
     auto end_time = std::chrono::high_resolution_clock::now();

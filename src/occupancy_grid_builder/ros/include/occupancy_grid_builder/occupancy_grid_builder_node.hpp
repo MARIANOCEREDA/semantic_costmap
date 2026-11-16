@@ -3,9 +3,6 @@
 #include <memory>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <occupancy_grid_builder/occupancy_grid_builder.hpp>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -53,7 +50,6 @@ class OccupancyGridBuilderNode : public rclcpp_lifecycle::LifecycleNode
 
   // Occupancy grid builder
   std::unique_ptr<OccupancyGridBuilder> grid_builder_;
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcl_cloud_;
 
   // Parameters
   std::string pointcloud_topic_;
