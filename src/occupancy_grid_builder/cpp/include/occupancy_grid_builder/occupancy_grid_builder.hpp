@@ -26,6 +26,10 @@ class OccupancyGridBuilder
   }
   ~OccupancyGridBuilder();
 
+  // When enabled, cells observed in earlier scans (free or occupied) but not in the current one are
+  // reported as `visited_value` (1..99) instead of unknown (-1). Throws on an out-of-range value.
+  void setVisitedAccumulation(bool enabled, int visited_value);
+
   std::vector<std::vector<int>>& buildGridFromPCL(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud,
                                                   const Eigen::Matrix4f& pcl_origin_to_map_transform);
   Eigen::Vector4f pointToMap(const Eigen::Vector4f& point_sensor_frame,
@@ -40,5 +44,7 @@ class OccupancyGridBuilder
   int height_ = 1000;        // cells → 100m
   double origin_x_ = -50.0;  // meters, grid origin offset from map frame origin
   double origin_y_ = -50.0;
+  bool accumulate_visited_ = true;
+  int visited_value_ = 50;  // between free (0) and occupied (100): drawn as mid grey in RViz
 };
 }  // namespace occupancy_grid_builder

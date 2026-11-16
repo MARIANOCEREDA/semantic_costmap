@@ -2,19 +2,38 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace occupancy_grid_builder
 {
 OccupancyGridBuilder::~OccupancyGridBuilder() = default;
 
+void OccupancyGridBuilder::setVisitedAccumulation(bool enabled, int visited_value)
+{
+  if (visited_value < 1 || visited_value > 99)
+  {
+    throw std::invalid_argument(
+        "OccupancyGridBuilder: visited_value must be in 1..99 (0 = free, 100 = occupied)");
+  }
+  accumulate_visited_ = enabled;
+  visited_value_ = visited_value;
+}
+
 std::vector<std::vector<int>>& OccupancyGridBuilder::buildGridFromPCL(
     const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud,
     const Eigen::Matrix4f& pcl_origin_to_map_transform)
 {
-  // Build a per-cloud snapshot so cells from earlier scans cannot persist.
+  // Start the new scan from the previous grid. Any cell that is not unknown was observed before
+  // (free, occupied or already visited), so it becomes "visited"; the ray tracing below overwrites
+  // it with free/occupied wherever the current scan sees it again. The previous grid itself is the
+  // history, so no extra memory is needed. Without accumulation every cell is reset to unknown.
+  const int carried_value = accumulate_visited_ ? visited_value_ : -1;
   for (auto& row : occupancy_grid_)
   {
-    std::fill(row.begin(), row.end(), -1);
+    for (int& cell : row)
+    {
+      cell = (cell == -1) ? -1 : carried_value;
+    }
   }
 
   // Compute sensor origin in map frame (sensor origin is at 0,0,0 in sensor frame)

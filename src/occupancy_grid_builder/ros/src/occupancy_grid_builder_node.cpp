@@ -24,6 +24,8 @@ OccupancyGridBuilderNode::OccupancyGridBuilderNode(const rclcpp::NodeOptions& op
   this->declare_parameter<double>("origin_x", -50.0);
   this->declare_parameter<double>("origin_y", -50.0);
   this->declare_parameter<bool>("display_latency", false);
+  this->declare_parameter<bool>("accumulate_visited", true);
+  this->declare_parameter<int>("visited_value", 50);
 }
 
 CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::State&)
@@ -52,6 +54,17 @@ CallbackReturn OccupancyGridBuilderNode::on_activate(const rclcpp_lifecycle::Sta
 
   grid_builder_ =
       std::make_unique<OccupancyGridBuilder>(resolution_, width_, height_, origin_x_, origin_y_);
+  try
+  {
+    grid_builder_->setVisitedAccumulation(
+        this->get_parameter("accumulate_visited").as_bool(),
+        static_cast<int>(this->get_parameter("visited_value").as_int()));
+  }
+  catch (const std::invalid_argument& ex)
+  {
+    RCLCPP_ERROR(this->get_logger(), "%s", ex.what());
+    return CallbackReturn::FAILURE;
+  }
 
   // Use TRANSIENT_LOCAL durability for map topic to be compatible with nav2 costmap
   auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
@@ -138,7 +151,7 @@ nav_msgs::msg::OccupancyGrid OccupancyGridBuilderNode::convertToOccupancyGrid(
   grid_msg.info.origin.orientation.w = 1.0;
 
   // Convert grid to OccupancyGrid data
-  // OccupancyGrid: -1 = unknown, 0 = free, 100 = occupied
+  // OccupancyGrid: -1 = unknown, 0 = free, 100 = occupied, 1..99 = visited in an earlier scan
   grid_msg.data.resize(width_ * height_);
 
   for (int y = 0; y < height_; ++y)
@@ -150,9 +163,13 @@ nav_msgs::msg::OccupancyGrid OccupancyGridBuilderNode::convertToOccupancyGrid(
       {
         grid_msg.data[index] = 0;  // Free
       }
-      else if (grid[y][x] > 0)
+      else if (grid[y][x] >= 100)
       {
         grid_msg.data[index] = 100;  // Occupied
+      }
+      else if (grid[y][x] > 0)
+      {
+        grid_msg.data[index] = static_cast<int8_t>(grid[y][x]);  // Visited in an earlier scan
       }
       else
       {
