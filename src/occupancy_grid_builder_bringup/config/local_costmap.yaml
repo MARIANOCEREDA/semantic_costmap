@@ -10,13 +10,10 @@ local_costmap:
       height: 5
       resolution: 0.1
       robot_radius: 0.1
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-      
-      static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: true
-        map_topic: /map
-        enabled: True
+      # No static_layer: /map is a live, accumulated grid (log-odds), not a static map. StaticLayer
+      # would re-copy the whole 4 MB grid on every update and read "uncertain" (1..99) as free.
+      # The obstacle_layer marks and clears directly from the LiDAR.
+      plugins: ["obstacle_layer", "inflation_layer"]
       
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
