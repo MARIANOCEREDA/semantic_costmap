@@ -78,7 +78,7 @@ PCLLabelerNode::PCLLabelerNode(const rclcpp::NodeOptions& options)
 
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
-  labeled_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+  labeled_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZL>>();
 
   this->declare_parameter<std::string>("camera_frame_name", "camera_frame");
   this->declare_parameter<std::string>("lidar_frame_name", "lidar_frame");

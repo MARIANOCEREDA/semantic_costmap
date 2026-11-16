@@ -65,7 +65,7 @@ class PCLLabelerNode : public rclcpp_lifecycle::LifecycleNode
 
   sensor_msgs::msg::PointCloud2 output_labeled_cloud_;
 
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr labeled_cloud_;
+  pcl::PointCloud<pcl::PointXYZL>::Ptr labeled_cloud_;
 
   // One labeler for the node's lifetime. Only used from label_point_cloud(), which runs in a
   // mutually exclusive callback group, so it is never accessed concurrently.
