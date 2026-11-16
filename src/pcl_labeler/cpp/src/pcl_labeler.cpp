@@ -76,7 +76,12 @@ bool PCLLabeler::is_point_valid(const float& x, const float& y, const float& z)
 
 const cv::Mat& PCLLabeler::erode_mask(const cv::Mat& mask)
 {
+  // min == max over the neighbourhood <=> the neighbourhood is uniform. For a 0/255 mask this is
+  // identical to a plain erode.
   cv::erode(mask, eroded_mask_, erode_kernel_, cv::Point(-1, -1), 1);
+  cv::dilate(mask, dilated_mask_, erode_kernel_, cv::Point(-1, -1), 1);
+  cv::compare(eroded_mask_, dilated_mask_, non_uniform_, cv::CMP_NE);
+  eroded_mask_.setTo(0, non_uniform_);
   return eroded_mask_;
 }
 

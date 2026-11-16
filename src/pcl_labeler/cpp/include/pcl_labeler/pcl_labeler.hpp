@@ -57,7 +57,9 @@ class PCLLabeler
 
  private:
   // Erodes `mask` into the reused member buffer and returns a reference to it. The reference is
-  // only valid until the next call.
+  // only valid until the next call. A pixel keeps its value only if its whole kernel
+  // neighbourhood has that same value; otherwise it becomes 0. Unlike a plain erode (a min
+  // filter), this never moves a pixel to another class at the border between two classes.
   const cv::Mat& erode_mask(const cv::Mat& mask);
   Eigen::Vector4f project_point_to_camera(const Eigen::Vector4f& point_lidar);
   bool is_point_in_front_of_camera(const Eigen::Vector4f& point_cam);
@@ -76,6 +78,10 @@ class PCLLabeler
   // Output of erode_mask(). Reused across frames: cv::erode only reallocates it when the mask
   // size or type changes. Never hand out copies of this header (cv::Mat copies share the buffer).
   cv::Mat eroded_mask_;
+  // Scratch buffers of erode_mask() (neighbourhood max, and "neighbourhood not uniform" flags).
+  // Reused the same way as eroded_mask_.
+  cv::Mat dilated_mask_;
+  cv::Mat non_uniform_;
 
   // Outlier removal state. All buffers are reused across frames (capacity is kept).
   OutlierRemovalParams outlier_params_;
