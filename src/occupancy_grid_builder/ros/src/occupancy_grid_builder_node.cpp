@@ -24,8 +24,14 @@ OccupancyGridBuilderNode::OccupancyGridBuilderNode(const rclcpp::NodeOptions& op
   this->declare_parameter<double>("origin_x", -50.0);
   this->declare_parameter<double>("origin_y", -50.0);
   this->declare_parameter<bool>("display_latency", false);
-  this->declare_parameter<bool>("accumulate_visited", true);
-  this->declare_parameter<int>("visited_value", 50);
+  // Log-odds accumulation (see occupancy_grid_builder::LogOddsParams)
+  const LogOddsParams log_odds_defaults;
+  this->declare_parameter<double>("hit_probability", log_odds_defaults.hit_probability);
+  this->declare_parameter<double>("miss_probability", log_odds_defaults.miss_probability);
+  this->declare_parameter<double>("min_probability", log_odds_defaults.min_probability);
+  this->declare_parameter<double>("max_probability", log_odds_defaults.max_probability);
+  this->declare_parameter<double>("occupied_threshold", log_odds_defaults.occupied_threshold);
+  this->declare_parameter<double>("free_threshold", log_odds_defaults.free_threshold);
 }
 
 CallbackReturn OccupancyGridBuilderNode::on_configure(const rclcpp_lifecycle::State&)
@@ -56,9 +62,14 @@ CallbackReturn OccupancyGridBuilderNode::on_activate(const rclcpp_lifecycle::Sta
       std::make_unique<OccupancyGridBuilder>(resolution_, width_, height_, origin_x_, origin_y_);
   try
   {
-    grid_builder_->setVisitedAccumulation(
-        this->get_parameter("accumulate_visited").as_bool(),
-        static_cast<int>(this->get_parameter("visited_value").as_int()));
+    LogOddsParams log_odds;
+    log_odds.hit_probability = this->get_parameter("hit_probability").as_double();
+    log_odds.miss_probability = this->get_parameter("miss_probability").as_double();
+    log_odds.min_probability = this->get_parameter("min_probability").as_double();
+    log_odds.max_probability = this->get_parameter("max_probability").as_double();
+    log_odds.occupied_threshold = this->get_parameter("occupied_threshold").as_double();
+    log_odds.free_threshold = this->get_parameter("free_threshold").as_double();
+    grid_builder_->setLogOddsParams(log_odds);
   }
   catch (const std::invalid_argument& ex)
   {
@@ -151,7 +162,7 @@ nav_msgs::msg::OccupancyGrid OccupancyGridBuilderNode::convertToOccupancyGrid(
   grid_msg.info.origin.orientation.w = 1.0;
 
   // The builder already stores cells row-major in OccupancyGrid encoding
-  // (-1 unknown, 0 free, 100 occupied, 1..99 visited), so this is a single memcpy.
+  // (-1 unknown, 0 free, 100 occupied, 1..99 uncertain), so this is a single memcpy.
   grid_msg.data.assign(grid.begin(), grid.end());
 
   return grid_msg;

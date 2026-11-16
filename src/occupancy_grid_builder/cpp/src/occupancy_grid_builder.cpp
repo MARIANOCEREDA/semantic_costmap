@@ -6,41 +6,95 @@
 
 namespace occupancy_grid_builder
 {
+namespace
+{
+float Logit(double probability)
+{
+  return static_cast<float>(std::log(probability / (1.0 - probability)));
+}
+}  // namespace
+
 OccupancyGridBuilder::~OccupancyGridBuilder() = default;
 
-void OccupancyGridBuilder::setVisitedAccumulation(bool enabled, int visited_value)
+void OccupancyGridBuilder::setLogOddsParams(const LogOddsParams& params)
 {
-  if (visited_value < 1 || visited_value > 99)
+  const bool valid = params.miss_probability > 0.0 && params.miss_probability < 0.5 &&
+                     params.hit_probability > 0.5 && params.hit_probability < 1.0 &&
+                     params.min_probability > 0.0 &&
+                     params.min_probability < params.free_threshold &&
+                     params.free_threshold < params.occupied_threshold &&
+                     params.occupied_threshold < params.max_probability &&
+                     params.max_probability < 1.0;
+  if (!valid)
   {
     throw std::invalid_argument(
-        "OccupancyGridBuilder: visited_value must be in 1..99 (0 = free, 100 = occupied)");
+        "OccupancyGridBuilder: invalid log-odds parameters, need 0 < miss < 0.5 < hit < 1 and "
+        "0 < min_probability < free_threshold < occupied_threshold < max_probability < 1");
   }
-  accumulate_visited_ = enabled;
-  visited_value_ = visited_value;
+  log_hit_ = Logit(params.hit_probability);
+  log_miss_ = Logit(params.miss_probability);
+  log_min_ = Logit(params.min_probability);
+  log_max_ = Logit(params.max_probability);
+  log_occupied_ = Logit(params.occupied_threshold);
+  log_free_ = Logit(params.free_threshold);
 }
 
-std::vector<std::vector<int>>& OccupancyGridBuilder::buildGridFromPCL(
+void OccupancyGridBuilder::markCell(int x, int y, ScanMark mark)
+{
+  if (!isInGrid(x, y))
+  {
+    return;
+  }
+  const std::size_t index = cellIndex(x, y);
+  ScanMark& current = scan_marks_[index];
+  if (current == ScanMark::kNone)
+  {
+    touched_.push_back(index);
+  }
+  current = std::max(current, mark);
+}
+
+void OccupancyGridBuilder::applyScanMarks()
+{
+  for (const std::size_t index : touched_)
+  {
+    const float update = scan_marks_[index] == ScanMark::kHit ? log_hit_ : log_miss_;
+    float& log_odds = log_odds_[index];
+    log_odds = std::clamp(log_odds + update, log_min_, log_max_);
+    cells_[index] = toCellValue(log_odds);
+    scan_marks_[index] = ScanMark::kNone;
+  }
+  touched_.clear();
+}
+
+std::int8_t OccupancyGridBuilder::toCellValue(float log_odds) const
+{
+  if (log_odds >= log_occupied_)
+  {
+    return kOccupied;
+  }
+  if (log_odds <= log_free_)
+  {
+    return kFree;
+  }
+  // Uncertain: probability in percent. Strictly between the thresholds, so never 0 or 100.
+  const float probability = 1.0f / (1.0f + std::exp(-log_odds));
+  return static_cast<std::int8_t>(std::lround(100.0f * probability));
+}
+
+const std::vector<std::int8_t>& OccupancyGridBuilder::buildGridFromPCL(
     const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud,
     const Eigen::Matrix4f& pcl_origin_to_map_transform)
 {
-  // Start the new scan from the previous grid. Any cell that is not unknown was observed before
-  // (free, occupied or already visited), so it becomes "visited"; the ray tracing below overwrites
-  // it with free/occupied wherever the current scan sees it again. The previous grid itself is the
-  // history, so no extra memory is needed. Without accumulation every cell is reset to unknown.
-  const int carried_value = accumulate_visited_ ? visited_value_ : -1;
-  for (auto& row : occupancy_grid_)
-  {
-    for (int& cell : row)
-    {
-      cell = (cell == -1) ? -1 : carried_value;
-    }
-  }
+  // The grid is not reset: each scan adds evidence to the accumulated log-odds. Pass 1 marks
+  // what this scan observed (at most one mark per cell), pass 2 applies one update per marked cell.
 
   // Compute sensor origin in map frame (sensor origin is at 0,0,0 in sensor frame)
-  Eigen::Vector4f sensor_origin_sensor_frame(0.0f, 0.0f, 0.0f, 1.0f);
-  Eigen::Vector4f sensor_origin_in_map_frame = 
+  const Eigen::Vector4f sensor_origin_sensor_frame(0.0f, 0.0f, 0.0f, 1.0f);
+  const Eigen::Vector4f sensor_origin_in_map_frame =
       pointToMap(sensor_origin_sensor_frame, pcl_origin_to_map_transform);
-  
+  const Eigen::Vector2i cell_origin = mapToGrid(sensor_origin_in_map_frame);
+
   for (const auto& point : cloud->points)
   {
     // NaN -> int is undefined and yields INT_MIN, making the Bresenham ray billions of cells long.
@@ -49,51 +103,28 @@ std::vector<std::vector<int>>& OccupancyGridBuilder::buildGridFromPCL(
       continue;
     }
 
-    Eigen::Vector4f point_sensor_frame(point.x, point.y, point.z, 1.0f);
-    Eigen::Vector4f point_in_map_frame =
+    const Eigen::Vector4f point_sensor_frame(point.x, point.y, point.z, 1.0f);
+    const Eigen::Vector4f point_in_map_frame =
         pointToMap(point_sensor_frame, pcl_origin_to_map_transform);
-    Eigen::Vector2i grid_coords = mapToGrid(point_in_map_frame);
+    const Eigen::Vector2i cell_hit = mapToGrid(point_in_map_frame);
 
-    // Raycasting with Bresenham's line algorithm to mark free space between the sensor origin and
-    // the point
-    auto cell_hit = mapToGrid(point_in_map_frame);
-    auto cell_origin = mapToGrid(sensor_origin_in_map_frame); 
+    // Raycasting with Bresenham's line algorithm from the sensor origin to the point
+    const auto ray_cells =
+        bresenhamLine(cell_origin.x(), cell_origin.y(), cell_hit.x(), cell_hit.y());
 
-    auto ray_cells = bresenhamLine(cell_origin.x(), cell_origin.y(), cell_hit.x(), cell_hit.y());
-
-    // Mark all cells along the ray as free (except the last one which is the hit point)
-    // Only update if cell was unknown (-1) or already free (0), don't override occupied cells
-    for (size_t i = 0; i < ray_cells.size() - 1; ++i)
+    // The ray passed through every cell except the last one (the endpoint)
+    for (std::size_t i = 0; i + 1 < ray_cells.size(); ++i)
     {
-      int x = ray_cells[i].x();
-      int y = ray_cells[i].y();
-      if (x >= 0 && x < width_ && y >= 0 && y < height_)
-      {
-        if (occupancy_grid_[y][x] != 100)  // Don't override occupied cells
-        {
-          occupancy_grid_[y][x] = 0;  // Mark as free (ROS2 nav2 standard)
-        }
-      }
+      markCell(ray_cells[i].x(), ray_cells[i].y(), ScanMark::kMiss);
     }
 
-    // Mark the hit point as occupied or free based on color
-    if (grid_coords.x() >= 0 && grid_coords.x() < width_ && grid_coords.y() >= 0 &&
-        grid_coords.y() < height_)
-    {
-      if (point.r > 0 || point.g > 0 || point.b > 0)  // Check if the point is colored
-      {
-        occupancy_grid_[grid_coords.y()][grid_coords.x()] = 100;  // Mark as occupied (ROS2 nav2 standard)
-      }
-      else
-      {
-        if (occupancy_grid_[grid_coords.y()][grid_coords.x()] != 100)  // Don't override occupied
-        {
-          occupancy_grid_[grid_coords.y()][grid_coords.x()] = 0;  // Mark as free
-        }
-      }
-    }
+    // Endpoint: an obstacle hit if the point is colored, otherwise seen through (free)
+    const bool is_obstacle = point.r > 0 || point.g > 0 || point.b > 0;
+    markCell(cell_hit.x(), cell_hit.y(), is_obstacle ? ScanMark::kHit : ScanMark::kMiss);
   }
-  return occupancy_grid_;
+
+  applyScanMarks();
+  return cells_;
 }
 
 Eigen::Vector4f OccupancyGridBuilder::pointToMap(const Eigen::Vector4f& point_sensor_frame,
