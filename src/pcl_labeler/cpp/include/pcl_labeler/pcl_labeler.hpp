@@ -49,11 +49,12 @@ class PCLLabeler
   void set_intrinsics(const Eigen::Matrix3f& intrinsics);
   void set_outlier_removal(const OutlierRemovalParams& params);
   // Labels the points of `cloud` that project onto non-zero pixels of `image` and writes them to
-  // `output`. The caller owns `output`; it is cleared (capacity kept) and refilled on every call.
+  // `output`, with `label` = the mask value (class_id + 1; 0 = background is never output).
+  // The caller owns `output`; it is cleared (capacity kept) and refilled on every call.
   // `cloud` must not point into `output`'s memory.
   void fuse(const cv::Mat& image,
             const PointCloudView& cloud,
-            pcl::PointCloud<pcl::PointXYZRGB>& output);
+            pcl::PointCloud<pcl::PointXYZL>& output);
 
  private:
   // Erodes `mask` into the reused member buffer and returns a reference to it. The reference is
@@ -66,9 +67,8 @@ class PCLLabeler
   bool is_point_valid(const float& x, const float& y, const float& z);
   bool is_point_in_image(const Eigen::Vector4f& point_cam, int img_width, int img_height);
   Eigen::Vector3f project_point_to_image(const Eigen::Vector4f& point_cam);
-  cv::Vec3b sample_color_at_pixel(const cv::Mat& image, int u, int v);
   // Removes statistical outliers from `cloud` in place, object by object (see label_indices_).
-  void remove_outliers(pcl::PointCloud<pcl::PointXYZRGB>& cloud);
+  void remove_outliers(pcl::PointCloud<pcl::PointXYZL>& cloud);
 
   Eigen::Matrix4f extrinsics_;
   Eigen::Matrix3f intrinsics_;
@@ -85,11 +85,11 @@ class PCLLabeler
 
   // Outlier removal state. All buffers are reused across frames (capacity is kept).
   OutlierRemovalParams outlier_params_;
-  pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor_;
+  pcl::StatisticalOutlierRemoval<pcl::PointXYZL> sor_;
   // label_indices_[m] = indices into the output cloud of the points that hit mask value m.
   std::array<pcl::Indices, 256> label_indices_;
   // One object's points, gathered so its neighbour search cannot see other objects.
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr object_cloud_;
+  pcl::PointCloud<pcl::PointXYZL>::Ptr object_cloud_;
   // SOR result: inlier indices into object_cloud_.
   pcl::Indices object_inliers_;
   // keep_flags_[i] != 0 if output point i survives outlier removal.

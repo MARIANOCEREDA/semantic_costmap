@@ -11,7 +11,7 @@ PCLLabeler::PCLLabeler()
   extrinsics_ = Eigen::Matrix4f::Identity();
   intrinsics_ = Eigen::Matrix3f::Identity();
   erode_kernel_ = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-  object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+  object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZL>>();
   set_outlier_removal(OutlierRemovalParams{});
 }
 
@@ -19,7 +19,8 @@ void PCLLabeler::set_outlier_removal(const OutlierRemovalParams& params)
 {
   if (params.mean_k < 1 || params.stddev_mul < 0.0)
   {
-    throw std::invalid_argument("PCLLabeler: outlier removal needs mean_k >= 1 and stddev_mul >= 0");
+    throw std::invalid_argument(
+        "PCLLabeler: outlier removal needs mean_k >= 1 and stddev_mul >= 0");
   }
   outlier_params_ = params;
   sor_.setMeanK(params.mean_k);
@@ -56,9 +57,7 @@ Eigen::Vector3f PCLLabeler::project_point_to_image(const Eigen::Vector4f& point_
   return Eigen::Vector3f(static_cast<float>(u), static_cast<float>(v), point_cam.z());
 }
 
-bool PCLLabeler::is_point_in_image(const Eigen::Vector4f& point_cam,
-                                   int img_width,
-                                   int img_height)
+bool PCLLabeler::is_point_in_image(const Eigen::Vector4f& point_cam, int img_width, int img_height)
 {
   if (!is_point_in_front_of_camera(point_cam))
   {
@@ -76,7 +75,6 @@ bool PCLLabeler::is_point_valid(const float& x, const float& y, const float& z)
 
 const cv::Mat& PCLLabeler::erode_mask(const cv::Mat& mask)
 {
-
   cv::erode(mask, eroded_mask_, erode_kernel_, cv::Point(-1, -1), 1);
   cv::dilate(mask, dilated_mask_, erode_kernel_, cv::Point(-1, -1), 1);
   cv::compare(eroded_mask_, dilated_mask_, non_uniform_, cv::CMP_NE);
@@ -86,7 +84,7 @@ const cv::Mat& PCLLabeler::erode_mask(const cv::Mat& mask)
 
 void PCLLabeler::fuse(const cv::Mat& image,
                       const PointCloudView& cloud,
-                      pcl::PointCloud<pcl::PointXYZRGB>& output)
+                      pcl::PointCloud<pcl::PointXYZL>& output)
 {
   // 1. Clear the output cloud and the per-object index lists (both keep their capacity)
   output.clear();
@@ -106,8 +104,6 @@ void PCLLabeler::fuse(const cv::Mat& image,
     {
       const std::uint8_t* point_ptr = row_ptr + col * cloud.point_step;
 
-      // memcpy instead of reinterpret_cast<const float*>: the bytes may be unaligned and are not
-      // float objects, so a cast would be undefined behavior. The compiler emits a plain load.
       float x = 0.0f;
       float y = 0.0f;
       float z = 0.0f;
@@ -130,32 +126,26 @@ void PCLLabeler::fuse(const cv::Mat& image,
         continue;
       }
 
-      // 6. Sample the color from the image
+      // 6. Read the mask value (class_id + 1) at the projected pixel; 0 is background
       const Eigen::Vector3f uv = project_point_to_image(point_cam);
       const int u = static_cast<int>(uv.x());
       const int v = static_cast<int>(uv.y());
-
-      // Check if that pixel is part of the mask of the background
-      if (image_eroded.at<uint8_t>(v, u) == 0)
+      const std::uint8_t label = image_eroded.at<std::uint8_t>(v, u);
+      if (label == 0)
       {
         continue;
       }
 
-      const cv::Vec3b color = sample_color_at_pixel(image_eroded, u, v);
+      // Remember which class this output point belongs to (outlier removal groups by it)
+      label_indices_[label].push_back(static_cast<pcl::index_t>(output.size()));
 
-      // Remember which object (mask value) this output point belongs to
-      label_indices_[image_eroded.at<uint8_t>(v, u)].push_back(
-          static_cast<pcl::index_t>(output.size()));
-
-      // 7. Create a colored point and add it to the output cloud
-      pcl::PointXYZRGB colored_point;
-      colored_point.x = x;
-      colored_point.y = y;
-      colored_point.z = z;
-      colored_point.b = color[0];  // OpenCV stores channels as BGR
-      colored_point.g = color[1];
-      colored_point.r = color[2];
-      output.push_back(colored_point);
+      // 7. Add the labeled point to the output cloud
+      pcl::PointXYZL labeled_point;
+      labeled_point.x = x;
+      labeled_point.y = y;
+      labeled_point.z = z;
+      labeled_point.label = label;
+      output.push_back(labeled_point);
     }
   }
 
@@ -163,7 +153,7 @@ void PCLLabeler::fuse(const cv::Mat& image,
   remove_outliers(output);
 }
 
-void PCLLabeler::remove_outliers(pcl::PointCloud<pcl::PointXYZRGB>& cloud)
+void PCLLabeler::remove_outliers(pcl::PointCloud<pcl::PointXYZL>& cloud)
 {
   if (!outlier_params_.enabled || cloud.empty())
   {
@@ -221,12 +211,6 @@ void PCLLabeler::remove_outliers(pcl::PointCloud<pcl::PointXYZRGB>& cloud)
   cloud.points.resize(write);
   cloud.width = static_cast<std::uint32_t>(write);
   cloud.height = 1;
-}
-
-cv::Vec3b PCLLabeler::sample_color_at_pixel(const cv::Mat& image, int u, int v)
-{
-  const uint8_t mask_value = image.at<uint8_t>(v, u);
-  return cv::Vec3b(mask_value, mask_value, mask_value);
 }
 
 }  // namespace pcl_labeler
