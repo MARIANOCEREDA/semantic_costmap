@@ -64,7 +64,7 @@ source install/setup.bash
 
 The diagram below shows the main data flow and ROS components in the workspace.
 
-![Occupancy Grid Builder architecture](docs/occupancy_grid_builder.drawio.png)
+![Semantic Costmap Builder architecture](docs/semantic_costmap_builder.drawio.png)
 
 ## Run
 
