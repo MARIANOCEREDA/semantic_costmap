@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>semantic_costmap_bringup</name>
+  <version>0.0.0</version>
+  <description>Occupancy grid builder bringup package</description>
+  <maintainer email="gmarianocereda@gmail.com">dev</maintainer>
+  <license>MIT</license>
+
+  <depend>kiss_icp</depend>
+  <depend>pcl_labeler</depend>
+  <depend>image_processing</depend>
+  <depend>occupancy_layer_builder</depend>
+  <depend>yolo_onnx_ros</depend>
+  <depend>robot_description</depend>
+  <depend>robot_localization</depend>
+  <depend>rviz2</depend>
+  <depend>foxglove_bridge</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>nav2_lifecycle_manager</depend>
+  <depend>tf2_ros</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>lifecycle_msgs</depend>
+  <depend>ground_segmentation</depend>
+  <depend>rosbag2_transport</depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

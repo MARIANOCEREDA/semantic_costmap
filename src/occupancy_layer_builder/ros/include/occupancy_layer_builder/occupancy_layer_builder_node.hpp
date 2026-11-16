@@ -1,0 +1,76 @@
+#pragma once
+
+#include <memory>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <occupancy_layer_builder/occupancy_layer_builder.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <string>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <atomic>
+#include <condition_variable>
+#include <map>
+#include <mutex>
+#include <thread>
+
+namespace occupancy_layer_builder
+{
+
+using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+
+class OccupancyLayerBuilderNode : public rclcpp_lifecycle::LifecycleNode
+{
+
+ public:
+  explicit OccupancyLayerBuilderNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+  ~OccupancyLayerBuilderNode() override = default;
+
+  CallbackReturn on_configure(const rclcpp_lifecycle::State&) override;
+  CallbackReturn on_activate(const rclcpp_lifecycle::State&) override;
+  CallbackReturn on_deactivate(const rclcpp_lifecycle::State&) override;
+  CallbackReturn on_cleanup(const rclcpp_lifecycle::State&) override;
+  CallbackReturn on_shutdown(const rclcpp_lifecycle::State&) override;
+
+ private:
+  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+
+  nav_msgs::msg::OccupancyGrid convertToOccupancyGrid(const std::vector<std::int8_t>& grid,
+                                                      const std_msgs::msg::Header& header);
+  void layerBuilderThread(std::stop_token stop_token);
+
+  // Publishers and subscribers
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
+
+  // TF2
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+  // Occupancy grid builder
+  std::unique_ptr<OccupancyLayerBuilder> layer_builder_;
+
+  // Parameters
+  std::string pointcloud_topic_;
+  std::string grid_topic_;
+  std::string map_frame_;
+  std::string sensor_frame_;
+  double resolution_;
+  int width_;
+  int height_;
+  double origin_x_;
+  double origin_y_;
+  bool display_latency_;
+
+  std::jthread processing_thread_;
+  
+  mutable std::mutex pcl_mutex_;
+  std::atomic<bool> new_pointcloud_available_{false};
+  std::condition_variable pcl_cv_;
+  Eigen::Matrix4f transform_matrix_;
+  sensor_msgs::msg::PointCloud2::SharedPtr latest_pointcloud_msg_;
+  
+};
+
+}  // namespace occupancy_layer_builder

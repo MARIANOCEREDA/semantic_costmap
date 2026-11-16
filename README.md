@@ -35,8 +35,8 @@ rosdep install --from-paths src --ignore-src -r -y
 | `ground_segmentation` | ROS 2 component and segmentation plugins for classifying ground points. |
 | `image_processing` | Image processing components, including image undistortion. |
 | `kiss_icp` | LiDAR odometry component. |
-| `occupancy_grid_builder` | Builds occupancy-grid output from perception data. |
-| `occupancy_grid_builder_bringup` | System launch files, configuration, and RViz setup. |
+| `occupancy_layer_builder` | Builds occupancy-grid output from perception data. |
+| `semantic_costmap_bringup` | System launch files, configuration, and RViz setup. |
 | `pcl_labeler` | Labels and clusters point-cloud data. |
 | `robot_description` | Robot description and frame configuration. |
 | `yolo_onnx_ros` | ROS 2 component for ONNX-based image segmentation. |
@@ -71,7 +71,7 @@ The diagram below shows the main data flow and ROS components in the workspace.
 Launch the complete system:
 
 ```bash
-ros2 launch occupancy_grid_builder_bringup occupancy_grid_builder_bringup.launch.py
+ros2 launch semantic_costmap_bringup semantic_costmap_bringup.launch.py
 ```
 
 The launch file accepts these arguments:
@@ -85,7 +85,7 @@ The launch file accepts these arguments:
 For example, to use another input topic and disable RViz:
 
 ```bash
-ros2 launch occupancy_grid_builder_bringup occupancy_grid_builder_bringup.launch.py \
+ros2 launch semantic_costmap_bringup semantic_costmap_bringup.launch.py \
   topic:=/custom_points \
   visualize:=false \
   use_sim_time:=false

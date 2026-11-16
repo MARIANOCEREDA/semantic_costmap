@@ -12,8 +12,12 @@ PCL_LABELER_SRC    := $(WS_ROOT)/src/pcl_labeler
 PCL_LABELER_CPP    := $(PCL_LABELER_SRC)/cpp/build
 
 # Occupancy Grid Builder paths
-OCCUPANCY_GRID_BUILDER_SRC := $(WS_ROOT)/src/occupancy_grid_builder
-OCCUPANCY_GRID_BUILDER_CPP  := $(OCCUPANCY_GRID_BUILDER_SRC)/cpp/build
+OCCUPANCY_LAYER_BUILDER_SRC := $(WS_ROOT)/src/occupancy_layer_builder
+OCCUPANCY_LAYER_BUILDER_CPP  := $(OCCUPANCY_LAYER_BUILDER_SRC)/cpp/build
+
+# Semantic Layer Builder paths
+SEMANTIC_LAYER_BUILDER_SRC := $(WS_ROOT)/src/semantic_layer_builder
+SEMANTIC_LAYER_BUILDER_CPP := $(SEMANTIC_LAYER_BUILDER_SRC)/cpp/build
 
 # YOLO ONNX ROS paths
 YOLO_ONNX_ROS_SRC := $(WS_ROOT)/src/yolo_onnx_ros
@@ -25,17 +29,19 @@ GROUND_SEGMENTATION_CPP_SRC := $(GROUND_SEGMENTATION_SRC)/src/ground_segmentatio
 GROUND_SEGMENTATION_CPP := $(GROUND_SEGMENTATION_CPP_SRC)/build
 
 # Build settings
-JOBS         ?= $(shell nproc)
+JOBS         ?= $(shell nproc --ignore=8)
 BUILD_TYPE   ?= Release
 
 .PHONY: help \
         build-pcl-labeler build-pcl-labeler-cpp build-pcl-labeler-ros2 \
-        build-occupancy-grid-builder build-occupancy-grid-builder-cpp build-occupancy-grid-builder-ros2 \
+        build-occupancy-layer-builder build-occupancy-layer-builder-cpp build-occupancy-layer-builder-ros2 \
+        build-semantic-layer-builder build-semantic-layer-builder-cpp build-semantic-layer-builder-ros2 \
         build-yolo-onnx-ros build-yolo-onnx-ros-cpp build-yolo-onnx-ros-ros2 \
 		build-ground-segmentation build-ground-segmentation-cpp build-ground-segmentation-ros2 \
         build-all-cpp build-all-ros2 build-all \
         clean-pcl-labeler clean-pcl-labeler-cpp clean-pcl-labeler-ros2 \
-        clean-occupancy-grid-builder clean-occupancy-grid-builder-cpp clean-occupancy-grid-builder-ros2 \
+        clean-occupancy-layer-builder clean-occupancy-layer-builder-cpp clean-occupancy-layer-builder-ros2 \
+        clean-semantic-layer-builder clean-semantic-layer-builder-cpp clean-semantic-layer-builder-ros2 \
         clean-yolo-onnx-ros clean-yolo-onnx-ros-cpp clean-yolo-onnx-ros-ros2 \
 		clean-ground-segmentation clean-ground-segmentation-cpp clean-ground-segmentation-ros2 \
         clean-all-cpp clean-all-ros2 clean-all \
@@ -52,9 +58,13 @@ help:
 	@echo "  build-pcl-labeler-cpp      Build pcl-labeler C++ library only"
 	@echo "  build-pcl-labeler-ros2     Build pcl-labeler ROS2 wrapper only"
 	@echo ""
-	@echo "  build-occupancy-grid-builder       Build occupancy-grid-builder (cpp + ros2)"
-	@echo "  build-occupancy-grid-builder-cpp   Build occupancy-grid-builder C++ library only"
-	@echo "  build-occupancy-grid-builder-ros2  Build occupancy-grid-builder ROS2 wrapper only"
+	@echo "  build-occupancy-layer-builder       Build occupancy-layer-builder (cpp + ros2)"
+	@echo "  build-occupancy-layer-builder-cpp   Build occupancy-layer-builder C++ library only"
+	@echo "  build-occupancy-layer-builder-ros2  Build occupancy-layer-builder ROS2 wrapper only"
+	@echo ""
+	@echo "  build-semantic-layer-builder       Build semantic-layer-builder (cpp + ros2)"
+	@echo "  build-semantic-layer-builder-cpp   Build semantic-layer-builder C++ library only"
+	@echo "  build-semantic-layer-builder-ros2  Build semantic-layer-builder ROS2 wrapper only"
 	@echo ""
 	@echo "  build-ground-segmentation          Build ground-segmentation (cpp + ros2)"
 	@echo "  build-ground-segmentation-cpp      Build ground-segmentation C++ core only"
@@ -70,9 +80,13 @@ help:
 	@echo "  clean-pcl-labeler-cpp      Clean pcl-labeler C++ library"
 	@echo "  clean-pcl-labeler-ros2     Clean pcl-labeler ROS2 build"
 	@echo ""
-	@echo "  clean-occupancy-grid-builder       Clean occupancy-grid-builder build artifacts"
-	@echo "  clean-occupancy-grid-builder-cpp   Clean occupancy-grid-builder C++ library"
-	@echo "  clean-occupancy-grid-builder-ros2  Clean occupancy-grid-builder ROS2 build"
+	@echo "  clean-occupancy-layer-builder       Clean occupancy-layer-builder build artifacts"
+	@echo "  clean-occupancy-layer-builder-cpp   Clean occupancy-layer-builder C++ library"
+	@echo "  clean-occupancy-layer-builder-ros2  Clean occupancy-layer-builder ROS2 build"
+	@echo ""
+	@echo "  clean-semantic-layer-builder       Clean semantic-layer-builder build artifacts"
+	@echo "  clean-semantic-layer-builder-cpp   Clean semantic-layer-builder C++ library"
+	@echo "  clean-semantic-layer-builder-ros2  Clean semantic-layer-builder ROS2 build"
 	@echo ""
 	@echo "  clean-ground-segmentation          Clean ground-segmentation build artifacts"
 	@echo "  clean-ground-segmentation-cpp      Clean ground-segmentation C++ core build"
@@ -162,51 +176,97 @@ clean-pcl-labeler: clean-pcl-labeler-cpp clean-pcl-labeler-ros2
 # Occupancy Grid Builder
 # ============================================================================
 
-build-occupancy-grid-builder-cpp:
+build-occupancy-layer-builder-cpp:
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════════════════════╗"
-	@echo "║  Building occupancy-grid-builder C++ library                               ║"
+	@echo "║  Building occupancy-layer-builder C++ library                               ║"
 	@echo "╚════════════════════════════════════════════════════════════════════════════╝"
-	@mkdir -p $(OCCUPANCY_GRID_BUILDER_CPP)
-	@cd $(OCCUPANCY_GRID_BUILDER_CPP) && \
+	@mkdir -p $(OCCUPANCY_LAYER_BUILDER_CPP)
+	@cd $(OCCUPANCY_LAYER_BUILDER_CPP) && \
 		cmake .. \
 			-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
-			-DCMAKE_INSTALL_PREFIX=$(OCCUPANCY_GRID_BUILDER_CPP)/install && \
+			-DCMAKE_INSTALL_PREFIX=$(OCCUPANCY_LAYER_BUILDER_CPP)/install && \
 		make -j$(JOBS) && \
 		make install
-	@echo " occupancy-grid-builder C++ library built successfully"
+	@echo " occupancy-layer-builder C++ library built successfully"
 	@echo ""
 
-build-occupancy-grid-builder-ros2: build-occupancy-grid-builder-cpp
+build-occupancy-layer-builder-ros2: build-occupancy-layer-builder-cpp
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════════════════════╗"
-	@echo "║  Building occupancy-grid-builder ROS2 wrapper                              ║"
+	@echo "║  Building occupancy-layer-builder ROS2 wrapper                              ║"
 	@echo "╚════════════════════════════════════════════════════════════════════════════╝"
 	@bash -c "source $(ROS_SETUP) && \
 		cd $(WS_ROOT) && \
 		colcon build \
 			--symlink-install \
 			--parallel-workers $(JOBS) \
-			--packages-select occupancy_grid_builder \
-			--cmake-args -DOCCUPANCY_GRID_BUILDER_CPP=$(OCCUPANCY_GRID_BUILDER_CPP) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+			--packages-select occupancy_layer_builder \
+			--cmake-args -DOCCUPANCY_LAYER_BUILDER_CPP=$(OCCUPANCY_LAYER_BUILDER_CPP) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 			--event-handlers console_cohesion+"
-	@echo " occupancy-grid-builder ROS2 wrapper built successfully"
+	@echo " occupancy-layer-builder ROS2 wrapper built successfully"
 	@echo ""
 
-build-occupancy-grid-builder: build-occupancy-grid-builder-ros2
+build-occupancy-layer-builder: build-occupancy-layer-builder-ros2
 
-clean-occupancy-grid-builder-cpp:
-	@echo "==> Cleaning occupancy-grid-builder C++ library..."
-	@rm -rf $(OCCUPANCY_GRID_BUILDER_CPP)
+clean-occupancy-layer-builder-cpp:
+	@echo "==> Cleaning occupancy-layer-builder C++ library..."
+	@rm -rf $(OCCUPANCY_LAYER_BUILDER_CPP)
 	@echo " Done"
 
-clean-occupancy-grid-builder-ros2:
-	@echo "==> Cleaning occupancy-grid-builder ROS2 build..."
-	@rm -rf $(WS_ROOT)/build/occupancy_grid_builder
-	@rm -rf $(WS_ROOT)/install/occupancy_grid_builder
+clean-occupancy-layer-builder-ros2:
+	@echo "==> Cleaning occupancy-layer-builder ROS2 build..."
+	@rm -rf $(WS_ROOT)/build/occupancy_layer_builder
+	@rm -rf $(WS_ROOT)/install/occupancy_layer_builder
 	@echo " Done"
 
-clean-occupancy-grid-builder: clean-occupancy-grid-builder-cpp clean-occupancy-grid-builder-ros2
+clean-occupancy-layer-builder: clean-occupancy-layer-builder-cpp clean-occupancy-layer-builder-ros2
+
+# ============================================================================
+# Semantic Layer Builder
+# ============================================================================
+
+build-semantic-layer-builder-cpp:
+	@echo ""
+	@echo "==> Building semantic-layer-builder C++ library"
+	@mkdir -p $(SEMANTIC_LAYER_BUILDER_CPP)
+	@cd $(SEMANTIC_LAYER_BUILDER_CPP) && \
+		cmake .. \
+			-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+			-DCMAKE_INSTALL_PREFIX=$(SEMANTIC_LAYER_BUILDER_CPP)/install && \
+		make -j$(JOBS) && \
+		make install
+	@echo " semantic-layer-builder C++ library built successfully"
+	@echo ""
+
+build-semantic-layer-builder-ros2: build-semantic-layer-builder-cpp
+	@echo ""
+	@echo "==> Building semantic-layer-builder ROS2 wrapper"
+	@bash -c "source $(ROS_SETUP) && \
+		cd $(WS_ROOT) && \
+		colcon build \
+			--symlink-install \
+			--parallel-workers $(JOBS) \
+			--packages-select semantic_layer_builder \
+			--cmake-args -DSEMANTIC_LAYER_BUILDER_CPP=$(SEMANTIC_LAYER_BUILDER_CPP) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+			--event-handlers console_cohesion+"
+	@echo " semantic-layer-builder ROS2 wrapper built successfully"
+	@echo ""
+
+build-semantic-layer-builder: build-semantic-layer-builder-ros2
+
+clean-semantic-layer-builder-cpp:
+	@echo "==> Cleaning semantic-layer-builder C++ library..."
+	@rm -rf $(SEMANTIC_LAYER_BUILDER_CPP)
+	@echo " Done"
+
+clean-semantic-layer-builder-ros2:
+	@echo "==> Cleaning semantic-layer-builder ROS2 build..."
+	@rm -rf $(WS_ROOT)/build/semantic_layer_builder
+	@rm -rf $(WS_ROOT)/install/semantic_layer_builder
+	@echo " Done"
+
+clean-semantic-layer-builder: clean-semantic-layer-builder-cpp clean-semantic-layer-builder-ros2
 
 # ============================================================================
 # Ground Segmentation
@@ -302,7 +362,7 @@ clean-yolo-onnx-ros: clean-yolo-onnx-ros-cpp clean-yolo-onnx-ros-ros2
 # Aggregate Targets
 # ============================================================================
 
-build-all-cpp: build-pcl-labeler-cpp build-occupancy-grid-builder-cpp build-yolo-onnx-ros-cpp build-ground-segmentation-cpp
+build-all-cpp: build-pcl-labeler-cpp build-occupancy-layer-builder-cpp build-semantic-layer-builder-cpp build-yolo-onnx-ros-cpp build-ground-segmentation-cpp
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════════════════════╗"
 	@echo "║  All C++ libraries built successfully                                      ║"
@@ -321,7 +381,8 @@ build-all-ros2: build-all-cpp
 			--parallel-workers $(JOBS) \
 			--cmake-args \
 				-DPCL_LABELER_CPP=$(PCL_LABELER_CPP) \
-				-DOCCUPANCY_GRID_BUILDER_CPP=$(OCCUPANCY_GRID_BUILDER_CPP) \
+				-DOCCUPANCY_LAYER_BUILDER_CPP=$(OCCUPANCY_LAYER_BUILDER_CPP) \
+				-DSEMANTIC_LAYER_BUILDER_CPP=$(SEMANTIC_LAYER_BUILDER_CPP) \
 				-DYOLO_CPP_PREFIX=$(YOLO_ONNX_CPP) \
 				-DGROUND_SEGMENTATION_CPP=$(GROUND_SEGMENTATION_CPP) \
 				-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
@@ -340,7 +401,7 @@ build-all: build-all-ros2
 	@echo ""
 	@bash -c "source $(WS_ROOT)/install/setup.bash"
 
-clean-all-cpp: clean-pcl-labeler-cpp clean-occupancy-grid-builder-cpp clean-yolo-onnx-ros-cpp clean-ground-segmentation-cpp
+clean-all-cpp: clean-pcl-labeler-cpp clean-occupancy-layer-builder-cpp clean-semantic-layer-builder-cpp clean-yolo-onnx-ros-cpp clean-ground-segmentation-cpp
 	@echo " All C++ libraries cleaned"
 
 clean-all-ros2:

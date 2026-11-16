@@ -26,7 +26,7 @@ digraph occupancy_grid_builder {
     pcl_labeler [label="pcl_labeler\npcl_labeler_node\npcl_labeler::PCLLabelerNode"];
     kiss_icp [label="kiss_icp\nkiss_icp_node\nkiss_icp_ros::OdometryServer"];
     ground_segmentation [label="ground_segmentation\nground_segmentation::GroundSegmentationNode"];
-    occupancy_grid_builder [label="occupancy_grid_builder\noccupancy_grid_builder_node\noccupancy_grid_builder::OccupancyGridBuilderNode"];
+    occupancy_layer_builder [label="occupancy_layer_builder\noccupancy_layer_builder_node\noccupancy_layer_builder::OccupancyLayerBuilderNode"];
     bbox_builder [label="bbox_builder"];
   }
 
@@ -87,9 +87,9 @@ digraph occupancy_grid_builder {
   non_ground_points -> pcl_labeler;
   pcl_labeler -> labeled_points;
   labeled_points -> bbox_builder;
-  labeled_points -> occupancy_grid_builder;
+  labeled_points -> occupancy_layer_builder;
   bbox_builder -> boxes;
-  occupancy_grid_builder -> occupancy_grid;
+  occupancy_layer_builder -> occupancy_grid;
 
   // Odometry estimation and sensor fusion.
   lidar_points -> kiss_icp;
@@ -105,5 +105,5 @@ digraph occupancy_grid_builder {
   robot_state_publisher -> robot_description;
   robot_state_publisher -> sensor_tf [label="fixed sensor transforms"];
   sensor_tf -> pcl_labeler [label="sensor transforms"];
-  localization_tf -> occupancy_grid_builder [label="map/base transforms"];
+  localization_tf -> occupancy_layer_builder [label="map/base transforms"];
 }
