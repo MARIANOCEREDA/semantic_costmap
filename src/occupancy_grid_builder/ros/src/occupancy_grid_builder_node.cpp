@@ -137,7 +137,7 @@ void OccupancyGridBuilderNode::pointCloudCallback(
 }
 
 nav_msgs::msg::OccupancyGrid OccupancyGridBuilderNode::convertToOccupancyGrid(
-    const std::vector<std::vector<int>>& grid, const std_msgs::msg::Header& header)
+    const std::vector<std::int8_t>& grid, const std_msgs::msg::Header& header)
 {
   nav_msgs::msg::OccupancyGrid grid_msg;
   grid_msg.header.stamp = header.stamp;
@@ -150,33 +150,9 @@ nav_msgs::msg::OccupancyGrid OccupancyGridBuilderNode::convertToOccupancyGrid(
   grid_msg.info.origin.position.z = 0.0;
   grid_msg.info.origin.orientation.w = 1.0;
 
-  // Convert grid to OccupancyGrid data
-  // OccupancyGrid: -1 = unknown, 0 = free, 100 = occupied, 1..99 = visited in an earlier scan
-  grid_msg.data.resize(width_ * height_);
-
-  for (int y = 0; y < height_; ++y)
-  {
-    for (int x = 0; x < width_; ++x)
-    {
-      int index = y * width_ + x;
-      if (grid[y][x] == 0)
-      {
-        grid_msg.data[index] = 0;  // Free
-      }
-      else if (grid[y][x] >= 100)
-      {
-        grid_msg.data[index] = 100;  // Occupied
-      }
-      else if (grid[y][x] > 0)
-      {
-        grid_msg.data[index] = static_cast<int8_t>(grid[y][x]);  // Visited in an earlier scan
-      }
-      else
-      {
-        grid_msg.data[index] = -1;  // Unknown
-      }
-    }
-  }
+  // The builder already stores cells row-major in OccupancyGrid encoding
+  // (-1 unknown, 0 free, 100 occupied, 1..99 visited), so this is a single memcpy.
+  grid_msg.data.assign(grid.begin(), grid.end());
 
   return grid_msg;
 }

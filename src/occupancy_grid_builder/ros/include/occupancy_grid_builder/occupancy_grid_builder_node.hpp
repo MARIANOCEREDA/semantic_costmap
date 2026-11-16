@@ -39,7 +39,7 @@ class OccupancyGridBuilderNode : public rclcpp_lifecycle::LifecycleNode
  private:
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
-  nav_msgs::msg::OccupancyGrid convertToOccupancyGrid(const std::vector<std::vector<int>>& grid,
+  nav_msgs::msg::OccupancyGrid convertToOccupancyGrid(const std::vector<std::int8_t>& grid,
                                                       const std_msgs::msg::Header& header);
   void gridBuilderThread(std::stop_token stop_token);
 
